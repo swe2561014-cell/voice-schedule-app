@@ -42,5 +42,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
 if __name__ == "__main__":
-    print("Нээх хаяг: http://localhost:8765  (зогсоох: Ctrl+C)")
-    ThreadingHTTPServer(("localhost", 8765), Handler).serve_forever()
+    port = int(os.environ.get("PORT", 8765))
+    server_address = ("0.0.0.0", port)
+    httpd = ThreadingHTTPServer(server_address, Handler)
+    print(f"Server running on port {port}...")
+    httpd.serve_forever()
