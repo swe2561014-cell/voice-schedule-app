@@ -184,7 +184,7 @@ function dayText(d){
 function render(){
   const el=document.getElementById("list"); el.innerHTML="";
   DAYS.forEach((d,i)=>{
-    const TTS_BASE = window.location.origin;
+    const items=data[i]||[];
     const c=document.createElement("div"); c.className="card";
     const h=document.createElement("h3");
     const title=document.createElement("span"); title.textContent=d;
@@ -213,7 +213,7 @@ function render(){
   });
 }
 
-// ---------- Дуу таних (Зассан) ----------
+// ---------- Дуу таних ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 function listen(onFinal){
   if(!SR){ setStatus("Таны хөтөч дуу таних боломжгүй. Chrome ашиглана уу."); return; }
@@ -257,7 +257,7 @@ function listen(onFinal){
 }
 
 // ---------- TTS ----------
-const TTS_BASE = location.protocol==="http:" ? "" : "http://localhost:8765";
+const TTS_BASE = window.location.origin;
 let speakToken=0, currentAudio=null;
 
 function chunkText(text,max=180){
@@ -337,12 +337,15 @@ function saveEntry(){
   if(shown && shown!==t) learn(shown,t);
   if(!data[selected]) data[selected]=[];
   
+  // Эхлээд жагсаалтад нэмж дэлгэцэнд харуулна
   data[selected].push({ text: t, time: tm });
   saveJSON("huvaari",data); render();
+  
   txt.value=""; shown=""; altsEl.innerHTML="";
   
   const msg=`${DAYS[selected]} гарагийн ${tm} цагт ${t} гэж хадгаллаа.`;
-  setStatus(msg); speak(msg);
+  setStatus(msg); 
+  speak(msg); // Дуу ажиллана
 }
 document.getElementById("saveBtn").onclick=saveEntry;
 txt.addEventListener("keydown",e=>{ if(e.key==="Enter") saveEntry(); });

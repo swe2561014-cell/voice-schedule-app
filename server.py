@@ -3,7 +3,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 import edge_tts
 
-VOICE = "mn-MN-YesuiNeural"   # эрэгтэй дуу хүсвэл: "mn-MN-BataaNeural"
+VOICE = "mn-MN-YesuiNeural"  # Эрэгтэй дуу хүсвэл: "mn-MN-Bataaneural"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 async def synth(text):
@@ -15,31 +15,34 @@ async def synth(text):
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        u = urlparse(self.path)
-        if u.path == "/tts":
-            text = parse_qs(u.query).get("text", [""])[0]
-            try:
-                audio = asyncio.run(synth(text))
-            except Exception as e:
-                print("TTS алдаа:", e)
-                self.send_error(500, str(e))
+        parsed = urlparse(self.path)
+        if parsed.path == "/tts":
+            qs = parse_qs(parsed.query)
+            text = qs.get("text", [""])[0]
+            if not text:
+                self.send_error(400, "Missing text")
                 return
-            self.send_response(200)
-            self.send_header("Content-Type", "audio/mpeg")
-            self.send_header("Content-Length", str(len(audio)))
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(audio)
-        elif u.path in ("/", "/kod.html"):
-            with open(os.path.join(HERE, "kod.html"), "rb") as f:
-                body = f.read()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                audio_bytes = asyncio.run(synth(text))
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Access-Control-Allow-Origin", "*")  # CORS зөвшөөрөл
+                self.end_headers()
+                self.wfile.write(audio_bytes)
+            except Exception as e:
+                self.send_error(500, str(e))
         else:
-            self.send_error(404)
+            # HTML эсвэл бусад файл буцаах
+            file_path = os.path.join(HERE, "kod.html" if parsed.path in ["/", "/kod.html"] else parsed.path.lstrip("/"))
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                self.send_response(200)
+                if file_path.endswith(".html"):
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                with open(file_path, "rb") as f:
+                    self.wfile.write(f.read())
+            else:
+                self.send_error(404, "Not Found")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8765))
