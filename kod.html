@@ -184,7 +184,7 @@ function dayText(d){
 function render(){
   const el=document.getElementById("list"); el.innerHTML="";
   DAYS.forEach((d,i)=>{
-    const items=data[i]||[];
+    const TTS_BASE = window.location.origin;
     const c=document.createElement("div"); c.className="card";
     const h=document.createElement("h3");
     const title=document.createElement("span"); title.textContent=d;
@@ -432,4 +432,4 @@ if("speechSynthesis" in window) speechSynthesis.getVoices();
 render();
 </script>
 </body>
-</html>ss
+</html>
