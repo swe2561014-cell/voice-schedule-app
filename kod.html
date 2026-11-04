@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дуут хуваарь ба Сануулга</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:640px;margin:20px auto;padding:0 12px;background:#f6f7f9;color:#222}
+  h1{font-size:22px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;align-items:center}
+  button{padding:10px 14px;border:0;border-radius:8px;background:#2f6fed;color:#fff;font-size:15px;cursor:pointer}
+  button.day{background:#e3e7ee;color:#222}
+  button.day.on{background:#2f6fed;color:#fff}
+  button.ask{background:#16a34a}
+  button.stop{background:#6b7280}
+  button.del{background:#dc2626;padding:4px 8px;font-size:12px}
+  button.say{background:#0ea5e9;padding:4px 8px;font-size:12px}
+  button.chip{background:#fff;color:#222;border:1px solid #cbd5e1;padding:6px 10px;font-size:13px}
+  input[type=text], input[type=time]{padding:10px;font-size:16px;border:1px solid #cbd5e1;border-radius:8px}
+  input[type=text]{flex:1;min-width:180px}
+  .card{background:#fff;border-radius:10px;padding:12px;margin:8px 0;box-shadow:0 1px 3px #0002}
+  .card h3{margin:0 0 6px;font-size:16px;display:flex;justify-content:space-between;align-items:center}
+  .item{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid #eee}
+  .time-tag{background:#e0f2fe;color:#0369a1;padding:2px 6px;border-radius:4px;font-weight:bold;margin-right:6px}
+  #status{min-height:22px;color:#555;font-weight:bold;margin:10px 0}
+  #live{min-height:20px;color:#2f6fed;font-style:italic}
+  .rec{animation:p 1s infinite}@keyframes p{50%{opacity:.5}}
+  .hint{font-size:13px;color:#666}
+</style>
+</head>
+<body>
+<h1>🎙️ 7 хоногийн хуваарь ба Сануулга</h1>
+<p class="hint">Chrome ашиглана уу. Микрофон болон Notification-д зөвшөөрөл өгнө үү.</p>
+
+<h3>1. Хуваарь хураах</h3>
+<div class="row" id="days"></div>
+<div class="row">
+  <input type="time" id="timeInput" value="12:00">
+  <input type="text" id="txt" placeholder="Хэлж эсвэл энд бичнэ үү...">
+  <button id="recBtn">🎤 Хэлэх</button>
+  <button id="saveBtn">✅ Хадгалах</button>
+</div>
+<div id="live"></div>
+<div class="row" id="alts"></div>
+<p class="hint">Жишээ: «Лхагва гарагт 11 цаг 10 минутад шалгалттай».</p>
+
+<h3>2. Асуух</h3>
+<div class="row">
+  <button class="ask" id="askBtn">🗣️ Асуух</button>
+  <button class="stop" id="stopBtn">⏹ Зогсоох</button>
+</div>
+<p class="hint">Жишээ: «Лхагва гарагт юу байна?», «Өнөөдөр», «Маргааш».</p>
+
+<div id="status"></div>
+<div id="list"></div>
+<button class="del" id="clearBtn">Бүгдийг арилгах</button>
+<button class="del" id="clearFixBtn">Санасан засваруудыг арилгах</button>
+
+<script>
+const DAYS  = ["Даваа","Мягмар","Лхагва","Пүрэв","Баасан","Бямба","Ням"];
+const STEMS = ["даваа","мягмар","лхагв","пүрэв","баасан","бямба","ням"];
+const LANG  = "mn-MN";
+let selected = 0;
+let shown = "";
+let data  = loadJSON("huvaari", {});
+let fixes = loadJSON("huvaari_fix", {});
+
+let notified5m = new Set();
+let notifiedStart = new Set();
+
+if ("Notification" in window && Notification.permission !== "granted") {
+  Notification.requestPermission();
+}
+
+function loadJSON(k, def){ try { return JSON.parse(localStorage.getItem(k)) || def; } catch { return def; } }
+function saveJSON(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function setStatus(t, rec){ const s=document.getElementById("status"); s.textContent=t; s.className=rec?"rec":""; }
+
+function words(t){ return t.toLowerCase().replace(/[.,!?«»"“”;:]/g," ").split(/\s+/).filter(Boolean); }
+function lev(a,b){
+  const m=a.length,n=b.length; if(!m) return n; if(!n) return m;
+  let prev=Array.from({length:n+1},(_,i)=>i);
+  for(let i=1;i<=m;i++){
+    const cur=[i];
+    for(let j=1;j<=n;j++){
+      cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
+    }
+    prev=cur;
+  }
+  return prev[n];
+}
+
+function matchDay(w){
+  for(let i=0;i<STEMS.length;i++){
+    const s=STEMS[i];
+    if(w.startsWith(s)) return i;
+    if(s.length>=5 && w.length>=s.length-1 && lev(w.slice(0,s.length),s)<=1) return i;
+  }
+  return -1;
+}
+function findDay(text){
+  for(const w of words(text)){ const d=matchDay(w); if(d>=0) return d; }
+  return -1;
+}
+function todayIndex(off=0){ return ((new Date().getDay()+6)%7+off)%7; }
+
+function parseIntent(text){
+  const ws=words(text);
+  const has=(...ps)=>ws.some(w=>ps.some(p=>w.startsWith(p)||(p.length>=5&&lev(w.slice(0,p.length),p)<=1)));
+  if(has("өнөөдр","өнөөдөр")) return [todayIndex(0)];
+  if(has("маргаа")) return [todayIndex(1)];
+  if(has("бүх","бүгд","хоногийн") || text.toLowerCase().includes("долоо хоног")) return [0,1,2,3,4,5,6];
+  const d=findDay(text); if(d>=0) return [d];
+  return null;
+}
+
+function applyFixes(text){
+  return text.split(/\s+/).map(w=>{
+    const k=w.toLowerCase().replace(/[.,!?«»"]/g,"");
+    return fixes[k] ? fixes[k] : w;
+  }).join(" ");
+}
+
+function parseTimeAndCleanText(text) {
+  let t = text.toLowerCase();
+  let timeStr = null;
+  
+  let matchColon = t.match(/(\d{1,2}):(\d{2})/);
+  let matchWords = t.match(/(\d{1,2})\s*цаг\s*(\d{1,2})?/);
+  
+  if (matchColon) {
+    let h = parseInt(matchColon[1]);
+    let m = parseInt(matchColon[2]);
+    timeStr = (h<10?'0':'')+h + ":" + (m<10?'0':'')+m;
+  } else if (matchWords) {
+    let h = parseInt(matchWords[1]);
+    let m = matchWords[2] ? parseInt(matchWords[2]) : 0;
+    timeStr = (h<10?'0':'')+h + ":" + (m<10?'0':'')+m;
+  }
+
+  let cleaned = t
+    .replace(/\b(\d{1,2}):(\d{2})\b/g, '')
+    .replace(/\b\d{1,2}\s*цаг\s*(\d{1,2}\s*минут(ад|т)?)?\b/g, '')
+    .replace(/цагт|цагаас|цагийн|минутад|минут/g, '')
+    .replace(/өнөөдөр|маргааш|одоо/g, '');
+
+  let ws = cleaned.split(/\s+/).filter(Boolean).filter(w => matchDay(w) < 0 && !w.startsWith("гараг"));
+  let out = ws.join(" ").trim();
+  out = out ? out[0].toUpperCase() + out.slice(1) : text;
+
+  return { cleaned: out, time: timeStr };
+}
+
+function learn(before, after){
+  const a=words(before), b=words(after);
+  if(!a.length || a.length!==b.length || a.length>12) return;
+  for(let i=0;i<a.length;i++){
+    if(a[i]!==b[i] && a[i].length>=2){ fixes[a[i]]=b[i]; }
+  }
+  saveJSON("huvaari_fix", fixes);
+}
+
+// ---------- Өдрийн товчнууд ----------
+const daysEl=document.getElementById("days");
+function setDay(i){
+  selected=i;
+  [...daysEl.children].forEach((x,j)=>x.classList.toggle("on",j===i));
+}
+DAYS.forEach((d,i)=>{
+  const b=document.createElement("button");
+  b.className="day"+(i===selected?" on":"");
+  b.textContent=d; b.onclick=()=>setDay(i);
+  daysEl.appendChild(b);
+});
+
+// ---------- Жагсаалт ----------
+function dayText(d){
+  const items=data[d]||[];
+  if(!items.length) return `${DAYS[d]} гарагт төлөвлөгөө алга.`;
+  const str = items.map(x => `${x.time ? x.time + ' цагт ' : ''}${x.text}`).join(", ");
+  return `${DAYS[d]} гарагт: ${str}.`;
+}
+
+function render(){
+  const el=document.getElementById("list"); el.innerHTML="";
+  DAYS.forEach((d,i)=>{
+    const items=data[i]||[];
+    const c=document.createElement("div"); c.className="card";
+    const h=document.createElement("h3");
+    const title=document.createElement("span"); title.textContent=d;
+    const sb=document.createElement("button"); sb.className="say"; sb.textContent="🔊";
+    sb.onclick=()=>speak(dayText(i));
+    h.append(title,sb); c.appendChild(h);
+    if(!items.length){ const e=document.createElement("div"); e.style.color="#999"; e.textContent="Хоосон"; c.appendChild(e); }
+    items.forEach((item,k)=>{
+      const r=document.createElement("div"); r.className="item";
+      const sp=document.createElement("span"); 
+      
+      if(item.time) {
+        const timeTag = document.createElement("span");
+        timeTag.className = "time-tag";
+        timeTag.textContent = item.time;
+        sp.appendChild(timeTag);
+      }
+      const textNode = document.createTextNode(item.text);
+      sp.appendChild(textNode);
+
+      const bt=document.createElement("button"); bt.className="del"; bt.textContent="✕";
+      bt.onclick=()=>{ data[i].splice(k,1); saveJSON("huvaari",data); render(); };
+      r.append(sp,bt); c.appendChild(r);
+    });
+    el.appendChild(c);
+  });
+}
+
+// ---------- Дуу таних (Зассан) ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function listen(onFinal){
+  if(!SR){ setStatus("Таны хөтөч дуу таних боломжгүй. Chrome ашиглана уу."); return; }
+  stopSpeaking();
+  const r = new SR();
+  r.lang = LANG; 
+  r.interimResults = true; 
+  r.maxAlternatives = 5; 
+  r.continuous = false;
+  
+  const live = document.getElementById("live"); 
+  live.textContent = "";
+  let got = false;
+
+  r.onstart = () => setStatus("Сонсож байна... тод хэлнэ үү", true);
+  r.onerror = e => { 
+    setStatus("Дуу таних алдаа: " + e.error); 
+  };
+  r.onresult = e => {
+    const res = e.results[e.results.length-1];
+    if(!res.isFinal){ live.textContent = "… " + res[0].transcript; return; }
+    got = true; 
+    live.textContent = "";
+    const alts = []; 
+    for(let k=0; k<res.length; k++){ 
+      const t = res[k].transcript.trim(); 
+      if(t && !alts.includes(t)) alts.push(t); 
+    }
+    onFinal(alts.map(applyFixes));
+  };
+  r.onend = () => { 
+    if(!got) live.textContent = ""; 
+    setStatus("");
+  };
+  
+  try {
+    r.start();
+  } catch(err) {
+    setStatus("Микрофон эхлүүлэхэд алдаа гарлаа: " + err.message);
+  }
+}
+
+// ---------- TTS ----------
+const TTS_BASE = location.protocol==="http:" ? "" : "http://localhost:8765";
+let speakToken=0, currentAudio=null;
+
+function chunkText(text,max=180){
+  const parts=text.match(/[^.!?]+[.!?]?/g)||[text]; const out=[]; let cur="";
+  for(const p of parts){
+    if((cur+p).length>max && cur){ out.push(cur.trim()); cur=""; }
+    if(p.length>max){ for(let i=0;i<p.length;i+=max) out.push(p.slice(i,i+max).trim()); } else cur+=p;
+  }
+  if(cur.trim()) out.push(cur.trim());
+  return out.filter(Boolean);
+}
+function playChunk(text){
+  return new Promise((resolve,reject)=>{
+    const url=TTS_BASE+"/tts?text="+encodeURIComponent(text);
+    const a=new Audio(url); currentAudio=a;
+    a.onended=resolve;
+    a.onerror=()=>reject(new Error("сервертэй холбогдсонгүй"));
+    a.play().catch(reject);
+  });
+}
+function browserSpeak(text){
+  if(!("speechSynthesis" in window)) return;
+  const u=new SpeechSynthesisUtterance(text); u.lang=LANG;
+  speechSynthesis.speak(u);
+}
+async function speak(text){
+  stopSpeaking(); const token=++speakToken;
+  try{
+    for(const part of chunkText(text)){ if(token!==speakToken) return; await playChunk(part); }
+  }catch(e){
+    if(token===speakToken){ browserSpeak(text); }
+  }
+}
+function stopSpeaking(){
+  speakToken++;
+  if(currentAudio){ currentAudio.pause(); currentAudio=null; }
+  if("speechSynthesis" in window) speechSynthesis.cancel();
+}
+document.getElementById("stopBtn").onclick=stopSpeaking;
+
+// ---------- Хадгалах ----------
+const txt=document.getElementById("txt");
+const timeInput=document.getElementById("timeInput");
+const altsEl=document.getElementById("alts");
+
+function fillFrom(candidate){
+  const d=findDay(candidate);
+  if(d>=0) setDay(d);
+  
+  const parsed = parseTimeAndCleanText(candidate);
+  shown = parsed.cleaned;
+  txt.value = shown;
+  if(parsed.time) {
+    timeInput.value = parsed.time;
+  }
+}
+
+document.getElementById("recBtn").onclick=()=>{
+  listen(alts=>{
+    if(!alts.length){ setStatus("Дуу таниагүй. Дахин хэлнэ үү."); return; }
+    const best=alts.find(a=>findDay(a)>=0)||alts[0];
+    fillFrom(best);
+    altsEl.innerHTML="";
+    alts.forEach(a=>{
+      const b=document.createElement("button"); b.className="chip"; b.textContent=a;
+      b.onclick=()=>fillFrom(a);
+      altsEl.appendChild(b);
+    });
+    setStatus("Шалгаад «Хадгалах» дарна уу.");
+  });
+};
+
+function saveEntry(){
+  const t=txt.value.trim();
+  const tm=timeInput.value;
+  if(!t){ setStatus("Хадгалах текст хоосон байна."); return; }
+  if(shown && shown!==t) learn(shown,t);
+  if(!data[selected]) data[selected]=[];
+  
+  data[selected].push({ text: t, time: tm });
+  saveJSON("huvaari",data); render();
+  txt.value=""; shown=""; altsEl.innerHTML="";
+  
+  const msg=`${DAYS[selected]} гарагийн ${tm} цагт ${t} гэж хадгаллаа.`;
+  setStatus(msg); speak(msg);
+}
+document.getElementById("saveBtn").onclick=saveEntry;
+txt.addEventListener("keydown",e=>{ if(e.key==="Enter") saveEntry(); });
+
+// ---------- Асуух ----------
+document.getElementById("askBtn").onclick=()=>{
+  listen(alts=>{
+    let days=null, heard=alts[0]||"";
+    for(const a of alts){ const d=parseIntent(a); if(d){ days=d; heard=a; break; } }
+    if(!days){
+      const msg="Ямар өдрийн хуваарийг асууж байгаа нь ойлгогдсонгүй.";
+      setStatus(`«${heard}» — ${msg}`); speak(msg); return;
+    }
+    const answer=days.map(dayText).join(" ");
+    setStatus(`«${heard}» → ${answer}`); speak(answer);
+  });
+};
+
+document.getElementById("clearBtn").onclick=()=>{
+  if(confirm("Бүх хуваарийг устгах уу?")){ data={}; saveJSON("huvaari",data); render(); }
+};
+document.getElementById("clearFixBtn").onclick=()=>{
+  if(confirm("Програмын сурсан засваруудыг арилгах уу?")){ fixes={}; saveJSON("huvaari_fix",fixes); }
+};
+
+// ---------- САНУУЛАХ СИСТЕМ ----------
+setInterval(()=>{
+  const now = new Date();
+  const curDayIndex = (now.getDay() + 6) % 7;
+  const curItems = data[curDayIndex] || [];
+
+  curItems.forEach(item => {
+    if(!item.time) return;
+    const [h, m] = item.time.split(":").map(Number);
+    const eventTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
+
+    const diffMs = eventTime - now;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffMs / 60000);
+
+    const itemKey = `${curDayIndex}_${item.time}_${item.text}`;
+    
+    // 5 минутын өмнө
+    if(diffMin >= 4 && diffMin <= 5 && !notified5m.has(itemKey)){
+      notified5m.add(itemKey);
+      
+      const alertMsg = `Сануулга! 5 минутын дараа ${item.time} цагт ${item.text}.`;
+      
+      if ("Notification" in window && Notification.permission === "granted") {
+        const notif = new Notification("⏰ Сануулга (5 минутын өмнө)", {
+          body: `5 минутын дараа: ${item.text}\n(Энд дарж дэлгэрэнгүй сонсоно уу)`,
+          icon: "https://cdn-icons-png.flaticon.com/512/3602/3602123.png"
+        });
+
+        notif.onclick = () => {
+          window.focus();
+          speak(`Анхаараарай, 5 минутын дараа ${item.time} цагт ${item.text}`);
+        };
+      } else {
+        speak(alertMsg);
+      }
+    }
+
+    // 0 минут (яг болоход)
+    if(diffSec <= 0 && diffSec >= -30 && !notifiedStart.has(itemKey)){
+      notifiedStart.add(itemKey);
+      
+      const startMsg = `Таны товлосон зүйл эхэллээ: Өнөөдөр ${item.time} цагт ${item.text}`;
+      
+      if ("Notification" in window && Notification.permission === "granted") {
+        const notif = new Notification("🔔 Таны товлосон зүйл эхэллээ!", {
+          body: `${item.time} цаг боллоо: ${item.text}`,
+          icon: "https://cdn-icons-png.flaticon.com/512/3602/3602123.png"
+        });
+
+        notif.onclick = () => {
+          window.focus();
+          speak(startMsg);
+        };
+      }
+      speak(startMsg);
+    }
+  });
+}, 3000); 
+
+if("speechSynthesis" in window) speechSynthesis.getVoices();
+render();
+</script>
+</body>
+</html>ss
