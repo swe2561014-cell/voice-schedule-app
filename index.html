@@ -8,11 +8,13 @@
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background-color: #f2f2f7; color: #1c1c1e; }
         .card { background: white; padding: 20px; border-radius: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 20px; text-align: center; }
-        .status-box { padding: 15px; border-radius: 10px; background: #e5e5ea; font-size: 16px; font-weight: 600; margin-bottom: 15px; }
+        .status-box { padding: 15px; border-radius: 10px; background: #e5e5ea; font-size: 16px; font-weight: 600; margin-bottom: 15px; word-break: break-all; }
         .active-status { background: #34c759; color: white; }
+        .error-status { background: #ff3b30; color: white; }
         button { background: #007aff; color: white; border: none; padding: 15px 25px; font-size: 18px; border-radius: 12px; font-weight: bold; width: 100%; cursor: pointer; }
         .task-list { text-align: left; margin-top: 15px; }
         .task-item { background: #f9f9f9; padding: 10px 15px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid #007aff; }
+        .debug-log { font-size: 13px; color: #666; background: #eee; padding: 10px; border-radius: 8px; text-align: left; }
     </style>
 </head>
 <body>
@@ -24,6 +26,11 @@
     </div>
 
     <div class="card">
+        <h3>📝 Хамгийн сүүлд сонссон бичвэр:</h3>
+        <div id="debugLog" class="debug-log">(Одоогоор ямар нэг үг дуулаагүй байна)</div>
+    </div>
+
+    <div class="card">
         <h3>📅 Хадгалагдсан сануулгууд</h3>
         <div id="taskList" class="task-list"></div>
     </div>
@@ -31,21 +38,20 @@
     <script>
         let wakeLock = null;
         let isListeningForTask = false;
+        let isAssistantSpeaking = false;
         let tasks = JSON.parse(localStorage.getItem('ios_tasks')) || [];
 
-        // 1. iPhone дэлгэцийг унтарч унтахаас сэргийлэх (iOS 16.4+)
         async function requestWakeLock() {
             try {
                 if ('wakeLock' in navigator) {
                     wakeLock = await navigator.wakeLock.request('screen');
-                    console.log('iPhone дэлгэц унтахгүй идэвхжлээ');
+                    console.log('iPhone дэлгэц идэвхтэй үлдэнэ');
                 }
             } catch (err) {
                 console.log('Wake Lock алдаа:', err);
             }
         }
 
-        // 2. Дуу танигч болон Тасралтгүй сонсох логик
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition;
 
@@ -53,58 +59,92 @@
             recognition = new SpeechRecognition();
             recognition.lang = 'mn-MN';
             recognition.continuous = true;
-            recognition.interimResults = false;
+            recognition.interimResults = true;
 
             recognition.onresult = (event) => {
+                if (isAssistantSpeaking) return; // Апп өөрөө ярьж байвал сонсохгүй
+
                 const lastIndex = event.results.length - 1;
                 const spokenText = event.results[lastIndex][0].transcript.trim().toLowerCase();
-                console.log("Сонссон үг:", spokenText);
+                
+                document.getElementById('debugLog').innerText = spokenText;
 
-                // А. Нууц үг сонсох үе
+                // Нууц үг сонсох горим
                 if (!isListeningForTask) {
-                    if (spokenText.includes("туслах аа") || spokenText.includes("туслах")) {
+                    if (spokenText.includes("туслах") || spokenText.includes("туслах аа") || spokenText.includes("assistant")) {
                         isListeningForTask = true;
                         updateStatus("Сонсож байна... Сануулгаа хэлнэ үү!", true);
                         speakText("Сонсож байна, сануулгаа хэлнэ үү.");
                     }
                 } 
-                // Б. Нууц үг хэлсний дараа сануулгыг тэмдэглэж авах үе
-                else {
+                // Сануулга тэмдэглэх горим (Final result ирэхэд)
+                else if (event.results[lastIndex].isFinal) {
                     saveTask(spokenText);
                     isListeningForTask = false;
                     updateStatus("Нууц үг ('Туслах аа') сонсож байна...", true);
                 }
             };
 
-            // Сонсолт зогсвол автоматаар дахин эхлүүлэх
+            recognition.onerror = (event) => {
+                console.error("Speech Recognition Error:", event.error);
+                document.getElementById('debugLog').innerText = "Алдаа гарлаа: " + event.error;
+                
+                if (event.error === 'not-allowed') {
+                    updateStatus("❌ Микрофоны зөвшөөрөл олгоогүй байна", false, true);
+                }
+            };
+
+            // iOS дээр аюулгүй дахин эхлүүлэх
             recognition.onend = () => {
-                recognition.start();
+                if (!isAssistantSpeaking) {
+                    setTimeout(() => {
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            console.log("Дахин эхлэх боломжгүй:", e);
+                        }
+                    }, 300);
+                }
             };
         }
 
-        // iPhone дээр анх удаа идэвхжүүлэх функц
         function initVoiceAssistant() {
             if (recognition) {
-                recognition.start();
-                requestWakeLock();
-                document.getElementById('startBtn').style.display = 'none';
-                updateStatus("Нууц үг ('Туслах аа') сонсож байна...", true);
-                speakText("Апп идэвхжлээ. Та Туслах аа гэж хэлээд сануулгаа өгнө үү.");
+                try {
+                    recognition.start();
+                    requestWakeLock();
+                    document.getElementById('startBtn').style.display = 'none';
+                    updateStatus("Нууц үг ('Туслах аа') сонсож байна...", true);
+                    speakText("Апп идэвхжлээ.");
+                } catch (e) {
+                    alert("Эхлүүлэхэд алдаа гарлаа: " + e.message);
+                }
             } else {
-                alert("Таны браузер дуут оруулгыг дэмжихгүй байна. Safari ашиглана уу.");
+                alert("Таны браузер Web Speech API дэмжихгүй байна. Safari ашиглана уу.");
             }
         }
 
-        function updateStatus(text, isActive = false) {
+        function updateStatus(text, isActive = false, isError = false) {
             const statusDiv = document.getElementById('status');
             statusDiv.innerText = text;
+            statusDiv.className = 'status-box';
             if (isActive) statusDiv.classList.add('active-status');
+            if (isError) statusDiv.classList.add('error-status');
         }
 
         function speakText(text) {
+            isAssistantSpeaking = true;
+            if (recognition) try { recognition.stop(); } catch(e){}
+
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'mn-MN';
+            
+            utterance.onend = () => {
+                isAssistantSpeaking = false;
+                try { recognition.start(); } catch(e){}
+            };
+
             window.speechSynthesis.speak(utterance);
         }
 
