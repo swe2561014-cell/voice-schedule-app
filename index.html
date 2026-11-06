@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iOS Дуут Туслах</title>
+    <link rel="manifest" href="data:application/json,{\"name\":\"Дуут туслах\",\"short_name\":\"Туслах\",\"display\":\"standalone\",\"start_url\":\".\"}">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background-color: #f2f2f7; color: #1c1c1e; }
+        .card { background: white; padding: 20px; border-radius: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 20px; text-align: center; }
+        .status-box { padding: 15px; border-radius: 10px; background: #e5e5ea; font-size: 16px; font-weight: 600; margin-bottom: 15px; }
+        .active-status { background: #34c759; color: white; }
+        button { background: #007aff; color: white; border: none; padding: 15px 25px; font-size: 18px; border-radius: 12px; font-weight: bold; width: 100%; cursor: pointer; }
+        .task-list { text-align: left; margin-top: 15px; }
+        .task-item { background: #f9f9f9; padding: 10px 15px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid #007aff; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>🎙️ Дуут туслах (iOS)</h2>
+        <div id="status" class="status-box">Эхлүүлэхийн тулд доорх товчийг нэг удаа дарна уу</div>
+        <button id="startBtn" onclick="initVoiceAssistant()">🚀 Апп идэвхжүүлэх</button>
+    </div>
+
+    <div class="card">
+        <h3>📅 Хадгалагдсан сануулгууд</h3>
+        <div id="taskList" class="task-list"></div>
+    </div>
+
+    <script>
+        let wakeLock = null;
+        let isListeningForTask = false;
+        let tasks = JSON.parse(localStorage.getItem('ios_tasks')) || [];
+
+        // 1. iPhone дэлгэцийг унтарч унтахаас сэргийлэх (iOS 16.4+)
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('iPhone дэлгэц унтахгүй идэвхжлээ');
+                }
+            } catch (err) {
+                console.log('Wake Lock алдаа:', err);
+            }
+        }
+
+        // 2. Дуу танигч болон Тасралтгүй сонсох логик
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'mn-MN';
+            recognition.continuous = true;
+            recognition.interimResults = false;
+
+            recognition.onresult = (event) => {
+                const lastIndex = event.results.length - 1;
+                const spokenText = event.results[lastIndex][0].transcript.trim().toLowerCase();
+                console.log("Сонссон үг:", spokenText);
+
+                // А. Нууц үг сонсох үе
+                if (!isListeningForTask) {
+                    if (spokenText.includes("туслах аа") || spokenText.includes("туслах")) {
+                        isListeningForTask = true;
+                        updateStatus("Сонсож байна... Сануулгаа хэлнэ үү!", true);
+                        speakText("Сонсож байна, сануулгаа хэлнэ үү.");
+                    }
+                } 
+                // Б. Нууц үг хэлсний дараа сануулгыг тэмдэглэж авах үе
+                else {
+                    saveTask(spokenText);
+                    isListeningForTask = false;
+                    updateStatus("Нууц үг ('Туслах аа') сонсож байна...", true);
+                }
+            };
+
+            // Сонсолт зогсвол автоматаар дахин эхлүүлэх
+            recognition.onend = () => {
+                recognition.start();
+            };
+        }
+
+        // iPhone дээр анх удаа идэвхжүүлэх функц
+        function initVoiceAssistant() {
+            if (recognition) {
+                recognition.start();
+                requestWakeLock();
+                document.getElementById('startBtn').style.display = 'none';
+                updateStatus("Нууц үг ('Туслах аа') сонсож байна...", true);
+                speakText("Апп идэвхжлээ. Та Туслах аа гэж хэлээд сануулгаа өгнө үү.");
+            } else {
+                alert("Таны браузер дуут оруулгыг дэмжихгүй байна. Safari ашиглана уу.");
+            }
+        }
+
+        function updateStatus(text, isActive = false) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerText = text;
+            if (isActive) statusDiv.classList.add('active-status');
+        }
+
+        function speakText(text) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'mn-MN';
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function saveTask(taskText) {
+            tasks.push(taskText);
+            localStorage.setItem('ios_tasks', JSON.stringify(tasks));
+            renderTasks();
+            speakText(`Амжилттай хадгаллаа: ${taskText}`);
+        }
+
+        function renderTasks() {
+            const container = document.getElementById('taskList');
+            container.innerHTML = '';
+            tasks.forEach((t, i) => {
+                const item = document.createElement('div');
+                item.className = 'task-item';
+                item.innerText = `${i + 1}. ${t}`;
+                container.appendChild(item);
+            });
+        }
+
+        renderTasks();
+    </script>
+</body>
+</html>
