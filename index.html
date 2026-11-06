@@ -1,187 +1,421 @@
 <!DOCTYPE html>
 <html lang="mn">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iOS Дуут Туслах (Харилцан яриа)</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background-color: #f2f2f7; color: #1c1c1e; }
-        .card { background: white; padding: 20px; border-radius: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 20px; text-align: center; }
-        .status-box { padding: 15px; border-radius: 10px; background: #e5e5ea; font-size: 16px; font-weight: 600; margin-bottom: 15px; word-break: break-all; }
-        .active-status { background: #34c759; color: white; }
-        button { background: #007aff; color: white; border: none; padding: 15px 25px; font-size: 18px; border-radius: 12px; font-weight: bold; width: 100%; cursor: pointer; }
-        .task-list { text-align: left; margin-top: 15px; }
-        .task-item { background: #f9f9f9; padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #007aff; line-height: 1.5; }
-        .debug-log { font-size: 13px; color: #666; background: #eee; padding: 10px; border-radius: 8px; text-align: left; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дуут туслах</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-width:640px;margin:0 auto;padding:16px;background:#f2f2f7;color:#1c1c1e}
+  .card{background:#fff;padding:16px;border-radius:14px;box-shadow:0 2px 8px #0001;margin-bottom:14px}
+  h2,h3{margin:0 0 10px;text-align:center}
+  .status{padding:14px;border-radius:10px;background:#e5e5ea;font-weight:600;text-align:center;margin-bottom:10px}
+  .status.ok{background:#34c759;color:#fff}.status.err{background:#ff3b30;color:#fff}
+  button{background:#007aff;color:#fff;border:0;padding:12px 16px;font-size:16px;border-radius:12px;font-weight:600;cursor:pointer}
+  #startBtn{width:100%;font-size:18px;padding:15px}
+  .row{display:flex;gap:8px;margin-top:8px}.row button{flex:1}
+  .alt{background:#16a34a}.gray{background:#6b7280}.del{background:#dc2626;padding:4px 9px;font-size:13px}
+  .hint{font-size:13px;color:#666;margin-top:8px;text-align:center}
+  #chat{max-height:240px;overflow:auto}#chat div{padding:3px 0}.bot{color:#16a34a}.me{color:#2f6fed}
+  #live{min-height:20px;color:#888;font-style:italic;font-size:14px;margin-top:6px}
+  .day h4{margin:10px 0 4px}.item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#f9f9f9;border-left:4px solid #007aff;border-radius:8px;padding:8px 10px;margin-bottom:6px}
+</style>
 </head>
 <body>
 
-    <div class="card">
-        <h2>🎙️ Дуут туслах (Интерактив)</h2>
-        <div id="status" class="status-box">Эхлүүлэхийн тулд доорх товчийг нэг удаа дарна уу</div>
-        <button id="startBtn" onclick="initVoiceAssistant()">🚀 Апп идэвхжүүлэх</button>
-    </div>
+<div class="card">
+  <h2>🎙️ Дуут туслах</h2>
+  <div id="status" class="status">Эхлүүлэхийн тулд товчийг нэг дарна уу</div>
+  <button id="startBtn">🚀 Апп идэвхжүүлэх</button>
+  <div class="row">
+    <button id="talkBtn" class="alt">🎙️ Ярилцах</button>
+    <button id="stopBtn" class="gray">⏹ Зогсоох</button>
+  </div>
+  <div class="hint">«Туслах аа» гэж дуудаад ярина. Дуудлага ажиллахгүй бол «Ярилцах» товч дарна.</div>
+</div>
 
-    <div class="card">
-        <h3>📝 Сонссон яриа:</h3>
-        <div id="debugLog" class="debug-log">(Одоогоор яриа дуулаагүй байна)</div>
-    </div>
+<div class="card">
+  <h3>💬 Яриа</h3>
+  <div id="chat"></div>
+  <div id="live"></div>
+</div>
 
-    <div class="card">
-        <h3>📅 Хадгалагдсан сануулгууд</h3>
-        <div id="taskList" class="task-list"></div>
-    </div>
+<div class="card">
+  <h3>📅 Хуваарь</h3>
+  <div id="list"></div>
+  <button class="del" id="clearBtn">Бүгдийг арилгах</button>
+</div>
 
-    <script>
-        let wakeLock = null;
-        let isAssistantSpeaking = false;
-        let tasks = JSON.parse(localStorage.getItem('ios_tasks')) || [];
+<script>
+// ===== Тохиргоо =====
+// Монгол дуу хоолой (edge-tts) өгдөг серверийн хаяг. Жишээ: "https://миний-сервер.onrender.com"
+// Хоосон бол: localhost дээр өөрийн сервер, өөр газар бол хөтчийн дуу хоолой ашиглана.
+const TTS_URL = "";
 
-        // Харилцан ярианы үе шатууд:
-        // 0: Хүлээх горим ("Туслах" гэж хэлэхийг сонсоно)
-        // 1: Сануулгын нэр асуух
-        // 2: Цаг асуух
-        // 3: Байршил асуух
-        // 4: Сануулах хугацаа асуух
-        let step = 0;
-        let currentTask = { title: "", time: "", location: "", notify: "" };
+const DAYS  = ["Даваа","Мягмар","Лхагва","Пүрэв","Баасан","Бямба","Ням"];
+const STEMS = ["даваа","мягмар","лхагв","пүрэв","баасан","бямба","ням"];
+const LANG  = "mn-MN";
+const isLocal = ["localhost","127.0.0.1"].includes(location.hostname);
+const TTS_BASE = TTS_URL || (isLocal ? "" : null);
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        let recognition;
+let tasks = load();
+let busy=false, cancelled=false, active=false, wakeRec=null, dialogRec=null, ttsWarned=false, wakeLock=null;
+const notified = new Set();
 
-        if (SpeechRecognition) {
-            recognition = new SpeechRecognition();
-            recognition.lang = 'mn-MN';
-            recognition.continuous = true;
-            recognition.interimResults = false;
+function load(){ try { return JSON.parse(localStorage.getItem("tasks_v2")) || []; } catch { return []; } }
+function persist(){ try { localStorage.setItem("tasks_v2", JSON.stringify(tasks)); } catch {} }
+function setStatus(t, cls=""){ const s=$("status"); s.textContent=t; s.className="status "+cls; }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 
-            recognition.onresult = (event) => {
-                if (isAssistantSpeaking) return; // Апп өөрөө ярьж байх үед дууг авахгүй
+// ===== Текст ойлгох =====
+function words(t){ return t.toLowerCase().replace(/[.,!?«»"“”;:]/g," ").split(/\s+/).filter(Boolean); }
+function lev(a,b){
+  const m=a.length,n=b.length; if(!m) return n; if(!n) return m;
+  let prev=Array.from({length:n+1},(_,i)=>i);
+  for(let i=1;i<=m;i++){
+    const cur=[i];
+    for(let j=1;j<=n;j++) cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
+    prev=cur;
+  }
+  return prev[n];
+}
+function matchDay(w){
+  for(let i=0;i<STEMS.length;i++){
+    const s=STEMS[i];
+    if(s.length<5){ if(w.startsWith(s) && w.length<=s.length+3) return i; continue; }
+    if(w.startsWith(s)) return i;
+    if(w.length>=s.length-1 && lev(w.slice(0,s.length),s)<=1) return i;
+  }
+  return -1;
+}
+function todayIndex(off=0){ return ((new Date().getDay()+6)%7+off)%7; }
+function parseDayAny(text){
+  const ws=words(text);
+  if(ws.some(w=>/^өнөөд/.test(w))) return todayIndex(0);
+  if(ws.some(w=>/^маргаа/.test(w))) return todayIndex(1);
+  if(ws.some(w=>/^нөгөөд/.test(w))) return todayIndex(2);
+  for(const w of ws){ const d=matchDay(w); if(d>=0) return d; }
+  return -1;
+}
+function isDayWord(w){ return matchDay(w)>=0 || /^(өнөөд|маргаа|нөгөөд|гараг)/.test(w); }
+function parseIntent(text){
+  if(words(text).some(w=>/^(бүх|бүгд|хоногийн)/.test(w)) || text.toLowerCase().includes("долоо хоног")) return [0,1,2,3,4,5,6];
+  const d=parseDayAny(text); return d>=0 ? [d] : null;
+}
 
-                const lastIndex = event.results.length - 1;
-                const spokenText = event.results[lastIndex][0].transcript.trim().toLowerCase();
-                document.getElementById('debugLog').innerText = spokenText;
+const U=["нэг","хоёр","гурав","дөрөв","тав","зургаа","долоо","найм","ес"];
+const NUMW=[];
+U.forEach((u,i)=>{ NUMW.push(["арван "+u,11+i]); NUMW.push(["хорин "+u,21+i]); });
+NUMW.push(["арав",10],["хорь",20]); U.forEach((u,i)=>NUMW.push([u,i+1]));
+function normNums(t){
+  for(const [w,n] of NUMW) t=t.replace(new RegExp("(^|\\s)"+w+"(?=\\s|$)","g"),"$1"+n);
+  return t;
+}
+const pad=n=>(n<10?"0":"")+n;
 
-                handleDialogue(spokenText);
-            };
+function parseTime(text, bareOk=false){
+  const t=normNums(" "+text.toLowerCase().replace(/[,!?«»"]/g," ")+" ");
+  let h=null,m=0,mm=t.match(/(\d{1,2})\s*[:.]\s*(\d{2})/);
+  if(mm){ h=+mm[1]; m=+mm[2]; }
+  else if((mm=t.match(/(\d{1,2})\s*цаг\S*(?:\s+(хагас))?(?:\s*(\d{1,2})\s*минут)?/))){
+    h=+mm[1]; if(mm[2]) m=30; else if(mm[3]) m=+mm[3];
+  } else if(bareOk && (mm=t.match(/^\s*(\d{1,2})\s*$/))){ h=+mm[1]; }
+  if(h===null) return "";
+  if(h<12 && /орой|үдээс|үдийн/.test(t)) h+=12;
+  if(h>23||m>59) return "";
+  return pad(h)+":"+pad(m);
+}
+function parseRemind(text){
+  const t=normNums(" "+text.toLowerCase()+" ");
+  if(/(үгүй|хэрэггүй|шаардлагагүй|сануулахгүй)/.test(t)) return 0;
+  if(/хагас\s*цаг/.test(t)) return 30;
+  let m=t.match(/(\d{1,3})\s*минут/); if(m) return +m[1];
+  m=t.match(/(\d{1,2})\s*цаг/); if(m) return +m[1]*60;
+  m=t.match(/^\s*(\d{1,3})\s*$/); if(m) return +m[1];
+  return undefined;
+}
+function parseYesNo(text){
+  const ws=words(text);
+  if(ws.some(w=>/^(үгүй|буруу|болохгүй|дахин)/.test(w))) return false;
+  if(ws.some(w=>w==="за"||w==="ок"||/^(тийм|зөв|болно|хадгал|тэгье|ойлг)/.test(w))) return true;
+  return undefined;
+}
+function capital(s){ s=s.trim(); return s ? s[0].toUpperCase()+s.slice(1) : ""; }
+function fmtTime(t){ const [h,m]=t.split(":").map(Number); return m ? `${h} цаг ${m} минут` : `${h} цаг`; }
 
-            recognition.onerror = (event) => {
-                console.error("Speech Error:", event.error);
-                document.getElementById('debugLog').innerText = "Алдаа: " + event.error;
-            };
+// Өгүүлбэрээс өдөр, цаг, ажлыг салгах
+function extract(text){
+  const day=parseDayAny(text), time=parseTime(text);
+  let t=normNums(" "+text.toLowerCase()+" ");
+  t=t.replace(/\d{1,2}\s*[:.]\s*\d{2}/g," ")
+     .replace(/\d{1,2}\s*цаг\S*(\s+хагас)?(\s*\d{1,2}\s*минут\S*)?/g," ");
+  if(time) t=t.replace(/(^|\s)(өглөө|орой|үдээс|хойш|үдийн)(?=\s)/g," ");
+  const task=capital(t.replace(/[.,!?«»"]/g," ").split(/\s+/).filter(Boolean).filter(w=>!isDayWord(w)).join(" "));
+  return {day,time,task};
+}
+function isQuery(a){ return /юу байна|юу бий|хуваарь/.test(a.toLowerCase()); }
+function interpret(alts){
+  for(const a of alts){ if(isQuery(a)) return {q:true,days:parseIntent(a)}; }
+  const best=alts.find(a=>parseDayAny(a)>=0||parseTime(a))||alts[0];
+  return extract(best);
+}
 
-            recognition.onend = () => {
-                if (!isAssistantSpeaking) {
-                    setTimeout(() => {
-                        try { recognition.start(); } catch (e) {}
-                    }, 300);
-                }
-            };
-        }
+// ===== Хуваарь харуулах =====
+function sorted(d){ return tasks.filter(t=>t.day===d).sort((a,b)=>(a.time||"").localeCompare(b.time||"")); }
+function dayText(d){
+  const items=sorted(d);
+  if(!items.length) return `${DAYS[d]} гарагт төлөвлөгөө алга.`;
+  return `${DAYS[d]} гарагт: `+items.map(x=>`${fmtTime(x.time)}: ${x.text}${x.loc?", газар: "+x.loc:""}`).join(". ")+".";
+}
+function render(){
+  const el=$("list"); el.innerHTML="";
+  if(!tasks.length){ el.textContent="Хоосон байна."; return; }
+  DAYS.forEach((d,i)=>{
+    const items=sorted(i); if(!items.length) return;
+    const box=document.createElement("div"); box.className="day";
+    const h=document.createElement("h4"); h.textContent=d; box.appendChild(h);
+    items.forEach(it=>{
+      const r=document.createElement("div"); r.className="item";
+      const sp=document.createElement("span");
+      sp.textContent=`⏰ ${it.time} — ${it.text}${it.loc?" 📍"+it.loc:""}${it.remind?" 🔔"+it.remind+" мин":""}`;
+      const b=document.createElement("button"); b.className="del"; b.textContent="✕";
+      b.onclick=()=>{ tasks=tasks.filter(x=>x.id!==it.id); persist(); render(); };
+      r.append(sp,b); box.appendChild(r);
+    });
+    el.appendChild(box);
+  });
+}
 
-        function handleDialogue(text) {
-            if (step === 0) {
-                if (text.includes("туслах") || text.includes("assistant")) {
-                    step = 1;
-                    updateStatus("Сонсож байна: Сануулгаа хэлнэ үү...", true);
-                    speakText("Ямар сануулга хадгалах вэ?");
-                }
-            } else if (step === 1) {
-                currentTask.title = text;
-                step = 2;
-                updateStatus("Хэзээ эсвэл хэдэн цагаас вэ?", true);
-                speakText(`Ойлголоо, ${text}. Хэдэн цагаас эсвэл хэзээ вэ?`);
-            } else if (step === 2) {
-                currentTask.time = text;
-                step = 3;
-                updateStatus("Хаана болох вэ?", true);
-                speakText("Хаана болох вэ?");
-            } else if (step === 3) {
-                currentTask.location = text;
-                step = 4;
-                updateStatus("Хэдэн минутын өмнө сануулах вэ?", true);
-                speakText("Урьдчилж хэзээ эсвэл хэдэн минутын өмнө сануулах вэ?");
-            } else if (step === 4) {
-                currentTask.notify = text;
-                saveCurrentTask();
-                step = 0; // Буцаад эхний төлөвт шилжинэ
-            }
-        }
+// ===== Дуу гаргах =====
+let speakToken=0, currentAudio=null;
+function chunkText(text,max=180){
+  const parts=text.match(/[^.!?]+[.!?]?/g)||[text]; const out=[]; let cur="";
+  for(const p of parts){
+    if((cur+p).length>max && cur){ out.push(cur.trim()); cur=""; }
+    if(p.length>max){ for(let i=0;i<p.length;i+=max) out.push(p.slice(i,i+max).trim()); } else cur+=p;
+  }
+  if(cur.trim()) out.push(cur.trim());
+  return out.filter(Boolean);
+}
+function playChunk(text){
+  return new Promise((resolve,reject)=>{
+    const a=new Audio(TTS_BASE+"/tts?text="+encodeURIComponent(text)); currentAudio=a;
+    a.onended=resolve; a.onerror=()=>reject(new Error("tts")); a.play().catch(reject);
+  });
+}
+function browserSpeak(text){
+  return new Promise(res=>{
+    if(!("speechSynthesis" in window)) return res();
+    const u=new SpeechSynthesisUtterance(text); u.lang=LANG;
+    u.onend=res; u.onerror=res; speechSynthesis.speak(u);
+    setTimeout(res,12000);
+  });
+}
+async function speak(text){
+  stopSpeaking(); const token=++speakToken;
+  if(TTS_BASE===null){ warnTts(); return browserSpeak(text); }
+  try{ for(const part of chunkText(text)){ if(token!==speakToken) return; await playChunk(part); } }
+  catch(e){ if(token===speakToken){ warnTts(); await browserSpeak(text); } }
+}
+function warnTts(){
+  if(ttsWarned) return; ttsWarned=true;
+  log("bot","(Монгол дуу хоолойн сервер холбогдоогүй тул хөтчийн дуугаар уншина. TTS_URL-ийг тохируулна уу.)");
+}
+function stopSpeaking(){
+  speakToken++;
+  if(currentAudio){ currentAudio.pause(); currentAudio=null; }
+  if("speechSynthesis" in window) speechSynthesis.cancel();
+}
 
-        function initVoiceAssistant() {
-            if (recognition) {
-                try {
-                    recognition.start();
-                    requestWakeLock();
-                    document.getElementById('startBtn').style.display = 'none';
-                    updateStatus("Нууц үг ('Туслах аа') сонсож байна...", true);
-                    speakText("Апп идэвхжлээ.");
-                } catch (e) {
-                    alert("Алдаа: " + e.message);
-                }
-            } else {
-                alert("Safari ашиглана уу.");
-            }
-        }
+// ===== Яриа =====
+function log(cls,text){
+  const c=$("chat"), d=document.createElement("div"); d.className=cls;
+  d.textContent=(cls==="bot"?"🤖 ":"🧑 ")+text; c.appendChild(d);
+  while(c.children.length>14) c.removeChild(c.firstChild);
+  c.scrollTop=c.scrollHeight;
+}
+async function say(text){ log("bot",text); setStatus("🔊 Хэлж байна...","ok"); await speak(text); }
 
-        function updateStatus(text, isActive = false) {
-            const statusDiv = document.getElementById('status');
-            statusDiv.innerText = text;
-            statusDiv.className = 'status-box';
-            if (isActive) statusDiv.classList.add('active-status');
-        }
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 
-        function speakText(text) {
-            isAssistantSpeaking = true;
-            if (recognition) try { recognition.stop(); } catch(e){}
+// Нэг удаа сонсох
+function hearOnce(){
+  return new Promise(resolve=>{
+    if(!SR){ setStatus("Энэ хөтөч дуу таних боломжгүй. Chrome ашиглана уу.","err"); return resolve(null); }
+    const r=new SR(); dialogRec=r;
+    r.lang=LANG; r.interimResults=true; r.maxAlternatives=5; r.continuous=false;
+    let done=false;
+    const finish=v=>{ if(!done){ done=true; dialogRec=null; $("live").textContent=""; resolve(v); } };
+    r.onstart=()=>setStatus("🎤 Хариулна уу...","ok");
+    r.onerror=e=>{
+      if(e.error==="no-speech"||e.error==="aborted") return finish([]);
+      setStatus("Алдаа: "+e.error,"err"); finish(null);
+    };
+    r.onresult=e=>{
+      const res=e.results[e.results.length-1];
+      if(!res.isFinal){ $("live").textContent="… "+res[0].transcript; return; }
+      const alts=[]; for(let k=0;k<res.length;k++){ const t=res[k].transcript.trim(); if(t && !alts.includes(t)) alts.push(t); }
+      finish(alts);
+    };
+    r.onend=()=>finish([]);
+    try{ r.start(); }catch(e){ finish(null); }
+  });
+}
 
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'mn-MN';
-            
-            utterance.onend = () => {
-                isAssistantSpeaking = false;
-                try { recognition.start(); } catch(e){}
-            };
+// Асууж, хариултыг шалгана. Ойлгохгүй бол 3 хүртэл удаа дахин асууна.
+async function ask(prompt, parse){
+  let p=prompt;
+  for(let i=0;i<3;i++){
+    if(cancelled) return undefined;
+    await say(p);
+    if(cancelled) return undefined;
+    const alts=await hearOnce();
+    if(alts===null || cancelled) return undefined;
+    if(alts.length){
+      log("me",alts[0]);
+      const v=parse(alts);
+      if(v!==undefined) return v;
+      p="Ойлгосонгүй. Дахин хэлнэ үү.";
+    } else p="Сайн сонсогдсонгүй. Дахин хэлнэ үү.";
+  }
+  return undefined;
+}
 
-            window.speechSynthesis.speak(utterance);
-        }
+async function converse(prefill){
+  let first=null;
+  if(prefill && prefill.split(/\s+/).length>=2){ log("me",prefill); first=interpret([prefill]); }
+  if(!first) first=await ask("Сонсож байна. Юу тэмдэглэх вэ, эсвэл хуваариа асууна уу?", interpret);
+  if(!first){ if(!cancelled) await say("Ойлгосонгүй. Дахин дуудна уу."); return; }
 
-        function saveCurrentTask() {
-            tasks.push(currentTask);
-            localStorage.setItem('ios_tasks', JSON.stringify(tasks));
-            renderTasks();
-            speakText("Сануулгыг амжилттай хадгаллаа.");
-            updateStatus("Нууц үг ('Туслах аа') сонсож байна...", true);
-            currentTask = { title: "", time: "", location: "", notify: "" };
-        }
+  // Хуваариа асуух
+  if(first.q){
+    let days=first.days;
+    if(!days) days=await ask("Аль өдрийн хуваарь вэ?", alts=>{ for(const a of alts){ const d=parseIntent(a); if(d) return d; } });
+    if(days) await say(days.map(dayText).join(" "));
+    return;
+  }
 
-        function renderTasks() {
-            const container = document.getElementById('taskList');
-            container.innerHTML = '';
-            tasks.forEach((t, i) => {
-                const item = document.createElement('div');
-                item.className = 'task-item';
-                item.innerHTML = `
-                    <strong>${i + 1}. ${t.title || t}</strong><br>
-                    <small>⏰ Цаг: ${t.time || '-'}</small> | 
-                    <small>📍 Байршил: ${t.location || '-'}</small><br>
-                    <small>🔔 Сануулах: ${t.notify || '-'}</small>
-                `;
-                container.appendChild(item);
-            });
-        }
+  // Шинээр тэмдэглэх: дутуу зүйлийг асууна
+  for(let round=0; round<3 && !cancelled; round++){
+    let f=first;
+    if(round>0){
+      f=await ask("Дахин эхэлье. Юу тэмдэглэх вэ?", interpret);
+      if(!f || f.q) break;
+    }
+    const e={day:f.day,time:f.time,task:f.task,loc:"",remind:0};
 
-        async function requestWakeLock() {
-            try {
-                if ('wakeLock' in navigator) {
-                    wakeLock = await navigator.wakeLock.request('screen');
-                }
-            } catch (err) {}
-        }
+    if(!e.task){ const t=await ask("Юу хийх вэ?", alts=>extract(alts[0]).task||undefined); if(t===undefined) break; e.task=t; }
+    if(e.day<0){ const d=await ask("Аль гарагт вэ?", alts=>{ for(const a of alts){ const x=parseDayAny(a); if(x>=0) return x; } }); if(d===undefined) break; e.day=d; }
+    if(!e.time){ const t=await ask("Хэдэн цагт вэ?", alts=>{ for(const a of alts){ const x=parseTime(a,true); if(x) return x; } }); if(t===undefined) break; e.time=t; }
 
-        renderTasks();
-    </script>
+    const loc=await ask("Хаана болох вэ?", alts=>{
+      const s=alts[0].replace(/[.,!?]/g,"").trim();
+      return /^(байхгүй|үгүй|хаана ч биш)$/i.test(s) ? "" : capital(s);
+    });
+    if(loc===undefined) break; e.loc=loc;
+
+    const rem=await ask("Хэдэн минутын өмнө сануулах вэ? Сануулах шаардлагагүй бол үгүй гэж хэлнэ үү.",
+      alts=>{ for(const a of alts){ const r=parseRemind(a); if(r!==undefined) return r; } });
+    if(rem===undefined) break; e.remind=rem;
+
+    const summary=`Давтан хэлье. ${DAYS[e.day]} гарагийн ${fmtTime(e.time)}. `+
+      (e.loc?`Газар: ${e.loc}. `:"")+`Ажил: ${e.task}. `+
+      (e.remind?`Сануулга: ${e.remind} минутын өмнө. `:"Сануулахгүй. ")+"Зөв үү?";
+    const ok=await ask(summary, alts=>{ for(const a of alts){ const y=parseYesNo(a); if(y!==undefined) return y; } });
+    if(ok===undefined) break;
+    if(ok){
+      tasks.push({id:uid(),day:e.day,time:e.time,text:e.task,loc:e.loc,remind:e.remind});
+      persist(); render();
+      await say("Хадгаллаа.");
+      return;
+    }
+  }
+  if(!cancelled) await say("За, хадгалсангүй.");
+}
+
+async function runDialog(prefill){
+  if(busy) return;
+  busy=true; cancelled=false; stopWake(); stopSpeaking();
+  try{ await sleep(300); await converse(prefill||""); }
+  finally{
+    busy=false; $("live").textContent="";
+    if(active) startWake(); else setStatus("");
+  }
+}
+
+// ===== «Туслах аа» гэж дуудахыг сонсох =====
+function isWakeWord(w){ return w.startsWith("туслах") || w.startsWith("туслаа") || (w.length>=5 && lev(w,"туслах")<=2); }
+function hasWake(text){ return words(text).some(isWakeWord); }
+function stripWake(text){
+  const ws=words(text), i=ws.findIndex(isWakeWord);
+  let rest=ws.slice(i+1); while(rest.length && /^аа+$/.test(rest[0])) rest.shift();
+  return rest.join(" ");
+}
+function startWake(){
+  if(!SR || !active || busy) return;
+  stopWake();
+  const r=new SR(); wakeRec=r;
+  r.lang=LANG; r.continuous=true; r.interimResults=true;
+  r.onresult=e=>{
+    const text=e.results[e.results.length-1][0].transcript.trim();
+    $("live").textContent="👂 "+text;
+    if(!busy && hasWake(text)){ const rest=stripWake(text); stopWake(); runDialog(rest); }
+  };
+  r.onerror=e=>{
+    if(e.error==="not-allowed"||e.error==="service-not-allowed"){ active=false; setStatus("❌ Микрофоны зөвшөөрөл олгоогүй байна","err"); }
+  };
+  r.onend=()=>{ if(wakeRec===r){ wakeRec=null; if(active&&!busy) setTimeout(startWake,400); } };
+  try{ r.start(); }catch(e){}
+  setStatus("Сонсож байна... «Туслах аа» гэж хэлнэ үү","ok");
+}
+function stopWake(){ const r=wakeRec; wakeRec=null; if(r){ try{ r.abort(); }catch(e){} } }
+
+// ===== Товчнууд =====
+async function requestWakeLock(){
+  try{ if("wakeLock" in navigator) wakeLock=await navigator.wakeLock.request("screen"); }catch(e){}
+}
+document.addEventListener("visibilitychange",()=>{ if(active && document.visibilityState==="visible") requestWakeLock(); });
+
+$("startBtn").onclick=async()=>{
+  if(!SR){ setStatus("Энэ хөтөч дуу таних боломжгүй. Chrome ашиглана уу.","err"); return; }
+  try{ const s=await navigator.mediaDevices.getUserMedia({audio:true}); s.getTracks().forEach(t=>t.stop()); }
+  catch(e){ setStatus("❌ Микрофоны зөвшөөрөл олгоогүй байна","err"); return; }
+  active=true; $("startBtn").style.display="none";
+  requestWakeLock();
+  if("Notification" in window && Notification.permission==="default") Notification.requestPermission();
+  await say("Апп идэвхжлээ.");
+  startWake();
+};
+$("talkBtn").onclick=()=>runDialog("");
+$("stopBtn").onclick=()=>{
+  cancelled=true; stopSpeaking();
+  if(dialogRec){ try{ dialogRec.abort(); }catch(e){} }
+  setStatus("Зогсоолоо.");
+};
+$("clearBtn").onclick=()=>{ if(confirm("Бүх хуваарийг устгах уу?")){ tasks=[]; persist(); render(); } };
+
+// ===== Сануулга (10 секунд тутамд шалгана) =====
+setInterval(()=>{
+  if(busy) return;
+  const now=new Date(), di=(now.getDay()+6)%7;
+  tasks.filter(t=>t.day===di && t.time && t.remind>0).forEach(t=>{
+    const [h,m]=t.time.split(":").map(Number);
+    const ev=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m,0);
+    const diff=ev-now, key=now.toDateString()+"|"+t.id;
+    if(diff<=t.remind*60000 && diff>-60000 && !notified.has(key)){
+      notified.add(key);
+      const mins=Math.max(0,Math.round(diff/60000));
+      const msg=(mins>0?`${mins} минутын дараа: `:"Одоо: ")+t.text+"."+(t.loc?` Газар: ${t.loc}.`:"");
+      log("bot","⏰ "+msg); speak(msg);
+      if("Notification" in window && Notification.permission==="granted"){
+        try{ new Notification("⏰ Сануулга",{body:msg}); }catch(e){}
+      }
+    }
+  });
+},10000);
+
+render();
+</script>
 </body>
 </html>
